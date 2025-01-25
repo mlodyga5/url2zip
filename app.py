@@ -6,8 +6,6 @@ import tempfile
 from urllib.parse import urlparse, unquote
 from pathlib import Path
 from datetime import datetime, timedelta
-import hashlib
-
 app = Flask(__name__)
 
 # Create a directory for storing zip files
@@ -35,16 +33,13 @@ def cleanup_old_files():
 
 def get_safe_filename(url, original_filename):
     """Create a safe, URL-friendly filename"""
-    # Create a unique identifier based on the URL
-    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-    
     # Clean the filename
     safe_filename = ''.join(c for c in original_filename if c.isalnum() or c in ('-', '_', '.'))
     safe_filename = safe_filename.lower()
     
-    # Combine hash and filename
+    # Use just the filename stem
     base_name = Path(safe_filename).stem
-    return f"{base_name}_{url_hash}"
+    return f"{base_name}.zip"
 
 @app.route('/')
 def home():
@@ -71,7 +66,7 @@ def create_zip():
         
         # Generate file key based on the URL and filename
         file_key = get_safe_filename(url, original_filename)
-        zip_filename = f'{file_key}.zip'
+        zip_filename = file_key  # file_key already includes .zip extension
         zip_path = os.path.join(STORAGE_DIR, zip_filename)
         
         # Check if file already exists and is not expired

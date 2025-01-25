@@ -1,47 +1,49 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, jsonify
 import requests
-import zipfile
-import os
 import tempfile
-import uuid
+import os
 from urllib.parse import urlparse, unquote
 from pathlib import Path
-from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# Create a directory for storing zip files
-STORAGE_DIR = os.path.join(tempfile.gettempdir(), 'zip_storage')
-os.makedirs(STORAGE_DIR, exist_ok=True)
+def get_gofile_server():
+    """Get the best server from gofile.io"""
+    try:
+        response = requests.get('https://api.gofile.io/getServer')
+        response.raise_for_status()
+        data = response.json()
+        if data['status'] == 'ok':
+            return data['data']['server']
+        raise Exception('Failed to get server: ' + data.get('status', 'unknown error'))
+    except Exception as e:
+        raise Exception(f'Error getting gofile server: {str(e)}')
 
-# Store file metadata
-files = {}
-
-def cleanup_old_files():
-    """Remove files older than 1 hour"""
-    current_time = datetime.now()
-    files_to_remove = []
-    
-    for file_id, metadata in files.items():
-        if current_time - metadata['created_at'] > timedelta(hours=1):
-            try:
-                os.remove(metadata['path'])
-                files_to_remove.append(file_id)
-            except OSError:
-                pass
-    
-    for file_id in files_to_remove:
-        files.pop(file_id)
+def upload_to_gofile(file_path):
+    """Upload a file to gofile.io"""
+    try:
+        # Get the best server
+        server = get_gofile_server()
+        
+        # Upload the file
+        with open(file_path, 'rb') as f:
+            files = {'file': f}
+            response = requests.post(f'https://{server}.gofile.io/uploadFile', files=files)
+            response.raise_for_status()
+            
+            data = response.json()
+            if data['status'] == 'ok':
+                return data['data']
+            raise Exception('Upload failed: ' + data.get('status', 'unknown error'))
+    except Exception as e:
+        raise Exception(f'Error uploading to gofile: {str(e)}')
 
 @app.route('/')
 def home():
-    return 'Service is running. Use /create?url=YOUR_URL to create zip files.'
+    return 'Service is running. Use /create?url=YOUR_URL to create and upload files to gofile.io.'
 
 @app.route('/create')
 def create_zip():
-    # Clean up old files
-    cleanup_old_files()
-    
     # Get URL parameter
     url = request.args.get('url')
     if not url:
@@ -60,11 +62,6 @@ def create_zip():
         if not original_filename:
             original_filename = 'downloaded_file'
         
-        # Generate unique ID for this file
-        file_id = str(uuid.uuid4())
-        zip_filename = f'{Path(original_filename).stem}.zip'
-        zip_path = os.path.join(STORAGE_DIR, f'{file_id}_{zip_filename}')
-        
         # Create temporary directory for processing
         with tempfile.TemporaryDirectory() as temp_dir:
             # Save the downloaded file
@@ -73,52 +70,20 @@ def create_zip():
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
-            # Create ZIP file
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(download_path, original_filename)
-        
-        # Store file metadata
-        files[file_id] = {
-            'path': zip_path,
-            'filename': zip_filename,
-            'created_at': datetime.now()
-        }
-        
-        # Generate download URL
-        download_url = f'/download/{file_id}'
-        
-        return jsonify({
-            'file_id': file_id,
-            'download_url': download_url,
-            'filename': zip_filename,
-            'expires_in': '1 hour'
-        })
+            # Upload to gofile.io
+            upload_result = upload_to_gofile(download_path)
+            
+            return jsonify({
+                'status': 'success',
+                'download_url': upload_result['downloadPage'],
+                'direct_link': upload_result['directLink'],
+                'filename': original_filename
+            })
     
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Error downloading file: {str(e)}'}), 400
     except Exception as e:
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
-
-@app.route('/download/<file_id>')
-def download_file(file_id):
-    # Clean up old files
-    cleanup_old_files()
-    
-    # Check if file exists
-    if file_id not in files:
-        return jsonify({'error': 'File not found or expired'}), 404
-    
-    file_info = files[file_id]
-    
-    try:
-        return send_file(
-            file_info['path'],
-            as_attachment=True,
-            download_name=file_info['filename'],
-            mimetype='application/zip'
-        )
-    except Exception as e:
-        return jsonify({'error': f'Error downloading file: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))

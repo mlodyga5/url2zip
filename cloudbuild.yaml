@@ -1,0 +1,14 @@
+steps:
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    args:
+      - gcloud
+      - functions
+      - deploy
+      - enc
+      - --region=us-central1
+      - --source=.
+      - --trigger-http
+      - --runtime=python310
+      - --timeout=540s
+      - --memory=2048MB
+      - --allow-unauthenticated

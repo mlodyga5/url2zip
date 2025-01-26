@@ -52,7 +52,7 @@ functions.http('encryptFile', async (req, res) => {
   } catch (error) {
     console.error('Error processing request:', error);
     res.status(500).json({
-      error: error.message,
+      error: error instanceof Error ? error.message : 'An unknown error occurred',
       retryable: true
     });
   }
@@ -76,7 +76,9 @@ functions.http('checkStatus', async (req, res) => {
     const job = jobDoc.data() as EncryptionJob;
     res.json(job);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 });
 
@@ -186,10 +188,12 @@ functions.http('processEncryption', async (req, res) => {
     // Update job with error
     await firestore.collection('encryption_jobs').doc(jobId).update({
       status: 'failed',
-      error: error.message,
+      error: error instanceof Error ? error.message : 'An unknown error occurred',
       updatedAt: new Date()
     });
 
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
+    });
   }
 });

@@ -1,39 +1,47 @@
-# main.py
 import functions_framework
-from flask import Request
+from flask import Request, Response
 import requests
 import base64
 
 @functions_framework.http
 def enc(request: Request):
     # Enable CORS
+    headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET',
+        'Content-Type': 'text/plain'
+    }
+    
     if request.method == 'OPTIONS':
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET',
+        headers.update({
             'Access-Control-Allow-Headers': 'Content-Type',
             'Access-Control-Max-Age': '3600'
-        }
+        })
         return ('', 204, headers)
-
-    headers = {'Access-Control-Allow-Origin': '*'}
     
     url = request.args.get('url')
     if not url:
         return ('URL parameter is required', 400, headers)
     
     try:
-        # Stream the response to handle large files
-        response = requests.get(url, stream=True, timeout=300)
-        response.raise_for_status()
+        def generate():
+            # Stream the download in chunks
+            with requests.get(url, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                
+                # Process and yield chunks
+                for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                    if chunk:
+                        # Encode and yield each chunk
+                        yield base64.b64encode(chunk).decode('utf-8')
         
-        # Read and encode in chunks
-        chunks = []
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                chunks.append(base64.b64encode(chunk).decode('utf-8'))
-        
-        return (''.join(chunks), 200, headers)
+        # Return a streaming response
+        return Response(
+            generate(),
+            status=200,
+            headers=headers,
+            mimetype='text/plain'
+        )
     
     except requests.exceptions.RequestException as e:
-        return (str(e), 500, headers)
+        return (f"Error downloading file: {str(e)}", 500, headers)

@@ -108,7 +108,7 @@ async function handleDirectEncryption(fileUrl: string) {
   });
 
   await new Promise((resolve, reject) => {
-    response.body
+    response.body!
       .pipe(cipher)
       .pipe(writeStream)
       .on('finish', resolve)
